@@ -62,13 +62,13 @@ class BaseEnv(gym.Env):
             self.render()
 
         return observation, info
-    
+
     def compute_observations(self):
         raise NotImplementedError
 
     def compute_info(self):
         raise NotImplementedError
-    
+
     def step(self, action: np.ndarray):
         """
         Takes a step in the environment.
@@ -97,16 +97,16 @@ class BaseEnv(gym.Env):
             self.render()
 
         return observation, reward, terminated, truncated, info
-    
+
     def pre_physics_step(self, action):
         raise NotImplementedError
-    
+
     def physics_step(self, action):
         raise NotImplementedError
-    
+
     def post_physics_step(self, action):
         raise NotImplementedError
-    
+
     def render(self):
         """
         Renders the environment.
@@ -119,14 +119,14 @@ class BaseEnv(gym.Env):
         if not self.headless:
             if self.viewer is None and self.renderer is None:
                 self.create_viewer()
-            
+
             if self.render_mode == "human":
                 self.viewer.sync()
                 if self.follow:
                     self.viewer.cam.lookat = self.mj_data.qpos[:3]
                 if not self.fast_forward:
                     time.sleep(1. / 100)
-            
+
             if self.render_mode == "rgb_array":
                 self.renderer.update_scene(self.mj_data, camera=self.camera)
                 pixels = self.renderer.render()
@@ -138,7 +138,7 @@ class BaseEnv(gym.Env):
         """
         if self.viewer is not None:
             self.viewer.close()
-    
+
     def seed(self, seed: Optional[int] = None):
         """
         Set the random seed for the environment.
@@ -167,20 +167,98 @@ class BaseEnv(gym.Env):
     def create_viewer(self):
         if not self.headless and self.render_mode == "human":
             self.viewer = mujoco.viewer.launch_passive(self.mj_model, self.mj_data, key_callback=self.key_callback)
-            
+            # Enable visualization options for better musculoskeletal view
+            if self.viewer is not None:
+                # Show tendons (muscles) - red lines
+                self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_TENDON] = True
+                # Show actuator forces
+                self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_ACTUATOR] = True
+                # Disable collision geoms by default (body shape)
+                self.viewer.opt.geomgroup[4] = False
+                print("Visualization initialized: Tendons=ON, Actuators=ON, Body_shape=OFF")
+
         if not self.headless and self.render_mode == "rgb_array":
             self._create_renderer()
 
     def key_callback(self, keycode):
-        print(keycode)
+        print(f"Key pressed: {keycode} (chr: {chr(keycode) if keycode < 128 else 'N/A'})")
         if chr(keycode) == " ":
             self.paused = not self.paused
             print(f"Paused {self.paused}")
-        elif chr(keycode) == "R":
+        elif chr(keycode) == "R" or chr(keycode) == "r":
             self.reset()
-        elif chr(keycode) == "M":
+        elif chr(keycode) == "M" or chr(keycode) == "m":
             self.disable_reset = not self.disable_reset
             print(f"Disable reset {self.disable_reset}")
-        elif chr(keycode) == "F":
+        elif chr(keycode) == "F" or chr(keycode) == "f":
             self.follow = not self.follow
             print(f"Follow {self.follow}")
+        elif chr(keycode) == "H" or chr(keycode) == "h":
+            # Toggle collision geom visibility (group 4 - capsules/ellipsoids for body shape)
+            if self.viewer is not None:
+                try:
+                    # Access the viewer's visualization options
+                    # Group 4 contains the collision geoms (body shape)
+                    self.viewer.opt.geomgroup[4] = 1 - self.viewer.opt.geomgroup[4]
+                    print(f"Body shape (collision geoms): {'ON' if self.viewer.opt.geomgroup[4] else 'OFF'}")
+                except Exception as e:
+                    print(f"Could not toggle body shape: {e}")
+        elif chr(keycode) == "S" or chr(keycode) == "s":
+            # Toggle skeleton (bone mesh) visibility (group 3)
+            if self.viewer is not None:
+                try:
+                    self.viewer.opt.geomgroup[3] = 1 - self.viewer.opt.geomgroup[3]
+                    print(f"Skeleton (bone mesh): {'ON' if self.viewer.opt.geomgroup[3] else 'OFF'}")
+                except Exception as e:
+                    print(f"Could not toggle skeleton: {e}")
+        elif chr(keycode) == "W" or chr(keycode) == "w":
+            # Toggle wireframe mode for bones
+            if self.viewer is not None:
+                try:
+                    # Cycle through render modes: 0=filled, 1=wireframe, 2=hidden
+                    current_frame = self.viewer.opt.frame
+                    self.viewer.opt.frame = (current_frame + 1) % 3
+                    modes = ["WORLD", "BODY", "GEOM"]
+                    print(f"Frame visualization: {modes[self.viewer.opt.frame]}")
+                except Exception as e:
+                    print(f"Could not toggle frame: {e}")
+        elif chr(keycode) == "T" or chr(keycode) == "t":
+            # Toggle tendon (muscle) visibility
+            if self.viewer is not None:
+                try:
+                    self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_TENDON] = 1 - self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_TENDON]
+                    print(f"Tendons (muscles): {'ON' if self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_TENDON] else 'OFF'}")
+                except Exception as e:
+                    print(f"Could not toggle tendons: {e}")
+        elif chr(keycode) == "J" or chr(keycode) == "j":
+            # Toggle joint visibility
+            if self.viewer is not None:
+                try:
+                    self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_JOINT] = 1 - self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_JOINT]
+                    print(f"Joints: {'ON' if self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_JOINT] else 'OFF'}")
+                except Exception as e:
+                    print(f"Could not toggle joints: {e}")
+        elif chr(keycode) == "B" or chr(keycode) == "b":
+            # Toggle body/skeleton inertia boxes
+            if self.viewer is not None:
+                try:
+                    self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_INERTIA] = 1 - self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_INERTIA]
+                    print(f"Body inertia (skeleton): {'ON' if self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_INERTIA] else 'OFF'}")
+                except Exception as e:
+                    print(f"Could not toggle inertia: {e}")
+        elif chr(keycode) == "K" or chr(keycode) == "k":
+            # Toggle perturbation force visualization
+            if self.viewer is not None:
+                try:
+                    self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = 1 - self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE]
+                    print(f"Perturbation forces: {'ON' if self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] else 'OFF'}")
+                except Exception as e:
+                    print(f"Could not toggle pert forces: {e}")
+        elif chr(keycode) == "A" or chr(keycode) == "a":
+            # Toggle actuator visibility
+            if self.viewer is not None:
+                try:
+                    self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_ACTUATOR] = 1 - self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_ACTUATOR]
+                    print(f"Actuators: {'ON' if self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_ACTUATOR] else 'OFF'}")
+                except Exception as e:
+                    print(f"Could not toggle actuators: {e}")
