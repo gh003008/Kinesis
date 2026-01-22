@@ -116,6 +116,8 @@ class MyoLegsIm(MyoLegsTask):
         self.random_sample = cfg.run.random_sample
         self.random_start = cfg.run.random_start
         self.recording_biomechanics = cfg.run.recording_biomechanics
+        self.record_tracking = cfg.run.get("record_tracking", False)  # New: track ref vs sim positions
+        self.tracking_output_dir = cfg.run.get("tracking_output_dir", "ghlee/tracking_plots")  # Custom output directory
 
     def load_initial_pose_data(self) -> None:
         """
@@ -143,9 +145,19 @@ class MyoLegsIm(MyoLegsTask):
         Sets:
             - `mpjpe` (list): Mean per-joint position error metric.
             - `frame_coverage` (float): Tracks the percentage of frames covered.
+            - `tracking_data` (dict): Stores reference and simulation positions for plotting.
         """
         self.mpjpe = []
         self.frame_coverage = 0
+        
+        # Initialize tracking data storage
+        if self.record_tracking:
+            self.tracking_data = {
+                'ref_positions': [],  # (T, num_bodies, 3)
+                'sim_positions': [],  # (T, num_bodies, 3)
+                'timestamps': [],     # (T,)
+                'motion_name': None,
+            }
 
     def initialize_biomechanical_recording(self):
         """
@@ -181,23 +193,25 @@ class MyoLegsIm(MyoLegsTask):
         Creates visual representations of tracked bodies in the task.
 
         Adds visual capsules to the viewer and renderer scenes for each tracked body. 
-        Capsules are color-coded for differentiation, with red and blue indicating different roles.
+        Capsules are color-coded for differentiation, with yellow (reference) and green (simulation).
         """
         if self.viewer is not None:  # this implies that headless == False
             for _ in range(len(self.track_bodies)):
+                # Yellow capsule for reference position
                 add_visual_capsule(
                     self.viewer.user_scn,
                     np.zeros(3),
                     np.array([0.001, 0, 0]),
                     0.05,
-                    np.array([1, 0, 0, 1]),
+                    np.array([1, 1, 0, 1]),  # Yellow (R=1, G=1, B=0)
                 )
+                # Green capsule for simulation position
                 add_visual_capsule(
                     self.viewer.user_scn,
                     np.zeros(3),
                     np.array([0.001, 0, 0]),
                     0.05,
-                    np.array([0, 0, 1, 1]),
+                    np.array([0, 1, 0, 1]),  # Green (R=0, G=1, B=0)
                 )
 
         if self.renderer is not None:
@@ -207,7 +221,7 @@ class MyoLegsIm(MyoLegsTask):
                     np.zeros(3),
                     np.array([0.001, 0, 0]),
                     0.05,
-                    np.array([1, 0, 0, 1]),
+                    np.array([1, 1, 0, 1]),  # Yellow for reference
                 )
 
     def draw_task(self) -> None:
@@ -416,6 +430,12 @@ class MyoLegsIm(MyoLegsTask):
 
         # Run kinematics
         mujoco.mj_kinematics(self.mj_model, self.mj_data)
+        
+        # Record motion name for tracking data (after evaluation metrics reset)
+        if self.record_tracking:
+            motion_idx = self._sampled_motion_ids[0]
+            self.tracking_data['motion_name'] = self.motion_lib.curr_motion_keys[motion_idx]
+            print(f"[DEBUG] Recording tracking data for motion: {self.tracking_data['motion_name']}")
 
     def reset_evaluation_metrics(self) -> None:
         """
@@ -423,6 +443,17 @@ class MyoLegsIm(MyoLegsTask):
         """
         self.mjpe = []
         self.mjve = []
+        
+        # Initialize tracking data for each new motion (but preserve motion_name from reset_task)
+        if self.record_tracking:
+            # Preserve motion_name if it was already set
+            prev_motion_name = self.tracking_data.get('motion_name', None) if hasattr(self, 'tracking_data') else None
+            self.tracking_data = {
+                'ref_positions': [],
+                'sim_positions': [],
+                'timestamps': [],
+                'motion_name': prev_motion_name,
+            }
 
     def delineate_biomechanical_recording(self) -> None:
         """
@@ -532,6 +563,10 @@ class MyoLegsIm(MyoLegsTask):
             self.frame_coverage = sim_time / self.motion_lib.get_motion_length(self._sampled_motion_ids)
         else:
             self.frame_coverage = 1.0
+        
+        # Save tracking data before reset if recording is enabled
+        if self.record_tracking:
+            self.save_tracking_data()
 
     def reset_task(self, options: Optional[dict]=None) -> None:
         """
@@ -580,7 +615,9 @@ class MyoLegsIm(MyoLegsTask):
                 # sample from the keys of initial_pos_dict[motion_id]
                 start_time = np.random.choice(list(self.initial_pos_data[motion_id].keys()))
                 self._motion_start_times[:] = start_time
-    
+        
+
+
     def get_true_motion_id(self) -> int:
         """
         Calculates the true motion ID based on the current configuration.
@@ -772,18 +809,25 @@ class MyoLegsIm(MyoLegsTask):
                                   ref_vel: np.ndarray
                                   ) -> None:
         """
-        Records evaluation metrics (MPJPE) for the current simulation step.
+        Records evaluation metrics (MPJPE) and tracking data for the current simulation step.
 
         Args:
-            body_pos (np.ndarray): Current body positions.
-            ref_pos (np.ndarray): Reference body positions.
+            body_pos (np.ndarray): Current body positions (1, num_bodies, 3).
+            ref_pos (np.ndarray): Reference body positions (1, num_bodies, 3).
             body_vel (np.ndarray): Current body velocities.
             ref_vel (np.ndarray): Reference body velocities.
 
         Updates:
             - `self.mpjpe`: Appends the mean position error for the current step.
+            - `self.tracking_data`: Records reference and simulation positions over time.
         """
         self.mpjpe.append(np.linalg.norm(body_pos - ref_pos, axis=-1).mean())
+        
+        # Record tracking data for visualization
+        if self.record_tracking:
+            self.tracking_data['ref_positions'].append(ref_pos[0].copy())  # (num_bodies, 3)
+            self.tracking_data['sim_positions'].append(body_pos[0].copy())  # (num_bodies, 3)
+            self.tracking_data['timestamps'].append(self.cur_t * self.dt)
 
     def compute_reward(self, action: Optional[np.ndarray] = None) -> float:
         """
@@ -893,6 +937,10 @@ class MyoLegsIm(MyoLegsTask):
         self.test = True
 
         self._temp_termination_distance = self.termination_distance
+        
+        # Initialize tracking motion index
+        if self.record_tracking:
+            self.tracking_motion_idx = 0  # Track which motion we're on
 
     def end_eval(self):
         """
@@ -1017,6 +1065,60 @@ class MyoLegsIm(MyoLegsTask):
             self.render()
 
         return observation, reward, terminated, truncated, info
+
+    def save_tracking_data(self, output_dir=None) -> None:
+        """
+        Saves and plots tracking data if recording is enabled.
+        
+        Args:
+            output_dir: Directory to save tracking plots (defaults to self.tracking_output_dir)
+        """
+        if output_dir is None:
+            output_dir = self.tracking_output_dir
+            
+        print(f"\n[DEBUG] save_tracking_data called:")
+        print(f"  record_tracking: {self.record_tracking}")
+        print(f"  output_dir: {output_dir}")
+        if hasattr(self, 'tracking_data'):
+            print(f"  tracking_data length: {len(self.tracking_data['ref_positions'])}")
+            print(f"  motion_name: {self.tracking_data.get('motion_name', 'None')}")
+        else:
+            print(f"  tracking_data not initialized!")
+        
+        if not self.record_tracking or len(self.tracking_data['ref_positions']) == 0:
+            print(f"[DEBUG] Skipping save: record_tracking={self.record_tracking}, data_len={len(self.tracking_data['ref_positions'])}")
+            return
+        
+        # Convert lists to arrays
+        ref_positions = np.array(self.tracking_data['ref_positions'])  # (T, num_bodies, 3)
+        sim_positions = np.array(self.tracking_data['sim_positions'])  # (T, num_bodies, 3)
+        motion_name = self.tracking_data['motion_name']
+        
+        # Import plot functions
+        from ghlee.plots.plot_tracking_performance import (
+            plot_tracking_performance,
+            plot_tracking_error_summary
+        )
+        
+        # Generate plots
+        print(f"\nGenerating tracking plots for motion: {motion_name}")
+        plot_tracking_performance(
+            ref_positions, sim_positions,
+            MYOLEG_TRACKED_BODIES,
+            motion_name=motion_name,
+            output_dir=output_dir,
+            dt=self.dt
+        )
+        
+        plot_tracking_error_summary(
+            ref_positions, sim_positions,
+            MYOLEG_TRACKED_BODIES,
+            motion_name=motion_name,
+            output_dir=output_dir,
+            dt=self.dt
+        )
+        
+        print(f"Tracking plots saved to: {output_dir}")
 
 
 def compute_imitation_observations(
