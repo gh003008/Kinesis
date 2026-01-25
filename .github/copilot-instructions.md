@@ -4,6 +4,55 @@
 
 ---
 
+## 🚨 최우선 원칙: Kinesis 원본 코드 보존
+
+> **⚠️ Kinesis 원본 코드(`src/`, `scripts/`, `cfg/`)는 절대 수정하지 않는다.**
+
+### 이유
+- Kinesis는 이미 KIT 데이터셋으로 검증된 코드
+- 원본 코드를 수정하면 기존에 잘 되던 것들이 안 될 수 있음
+- 커스텀 작업은 원본 코드에 맞추는 방향으로 진행
+
+### 올바른 접근 방식
+
+```
+✅ 올바른 예시:
+- 커스텀 모션 데이터를 Kinesis 형식(KIT 형식)에 맞게 변환
+- ghlee/ 폴더에 커스텀 스크립트 작성
+- 커스텀 스크립트에서 Kinesis 원본 코드를 import해서 사용
+
+❌ 절대 하면 안 되는 예시:
+- src/env/myolegs_im.py 수정
+- src/KinesisCore/kinesis_core.py 수정  
+- scripts/kit-locomotion.sh 수정
+- cfg/env/env_im_eval.yaml 수정
+```
+
+### Kinesis 데이터 형식 준수
+
+커스텀 모션 데이터는 **반드시** Kinesis/KIT 형식을 따라야 함:
+
+```python
+# Kinesis 모션 딕셔너리 형식 (kit_test_motion_dict.pkl과 동일)
+motion_dict = {
+    "motion_name": {
+        "pose_aa": np.ndarray,        # (T, 72) axis-angle
+        "pose_quat": np.ndarray,      # (T, 96) quaternion (local)
+        "pose_quat_global": np.ndarray,  # (T, 96) quaternion (global) - 평가에 필수!
+        "trans_orig": np.ndarray,     # (T, 3) root translation
+        "root_trans_offset": np.ndarray,  # (3,) offset
+        "beta": np.ndarray,           # (10,) SMPL shape
+        "gender": str,                # "neutral"
+        "fps": int,                   # 100
+    },
+    ...
+}
+```
+
+**중요**: `pose_quat_global` 키가 없으면 평가 코드에서 에러 발생!
+
+---
+
 ## 📋 스크립트 생성 규칙
 
 ### 1. 새로운 스크립트 생성 전 필수 확인 사항
