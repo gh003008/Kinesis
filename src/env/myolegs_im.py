@@ -187,6 +187,7 @@ class MyoLegsIm(MyoLegsTask):
             self.muscle_forces = []
             self.muscle_controls = []
             self.policy_outputs = []
+            self.joint_torques = []  # 조인트 토크 기록
 
     def create_task_visualization(self) -> None:
         """
@@ -472,6 +473,7 @@ class MyoLegsIm(MyoLegsTask):
         self.muscle_forces.append(np.full(self.get_muscle_force().shape, np.nan))
         self.muscle_controls.append(np.full(self.mj_data.ctrl.shape, np.nan))
         self.policy_outputs.append(np.full(self.mj_data.ctrl.shape, np.nan))
+        self.joint_torques.append(np.full((10,), np.nan))  # 10개 조인트 토크
 
     def get_task_obs_size(self) -> int:
         """
@@ -801,6 +803,7 @@ class MyoLegsIm(MyoLegsTask):
         self.motion_id.append(self.motion_start_idx)
         self.muscle_forces.append(self.get_muscle_force().copy())
         self.muscle_controls.append(self.mj_data.ctrl.copy())
+        self.joint_torques.append(self.get_joint_torques().copy())  # 조인트 토크 기록
 
     def record_evaluation_metrics(self, 
                                   body_pos: np.ndarray, 
@@ -957,6 +960,30 @@ class MyoLegsIm(MyoLegsTask):
         Retrieves the muscle forces from the simulation.
         """
         return self.mj_data.actuator_force
+
+    def get_joint_torques(self) -> np.ndarray:
+        """
+        Retrieves joint torques for hip, knee, and ankle joints.
+        
+        Returns:
+            np.ndarray: Joint torques in order [hip_flex_r, hip_add_r, hip_rot_r, knee_r, ankle_r,
+                                                 hip_flex_l, hip_add_l, hip_rot_l, knee_l, ankle_l]
+                        Shape: (10,)
+        """
+        # 조인트 이름들
+        joint_names = [
+            "hip_flexion_r", "hip_adduction_r", "hip_rotation_r", "knee_angle_r", "ankle_angle_r",
+            "hip_flexion_l", "hip_adduction_l", "hip_rotation_l", "knee_angle_l", "ankle_angle_l",
+        ]
+        
+        # 각 조인트의 토크 추출
+        torques = []
+        for joint_name in joint_names:
+            joint_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+            # qfrc_actuator: actuator(근육)에 의한 조인트 토크
+            torques.append(self.mj_data.qfrc_actuator[joint_id])
+        
+        return np.array(torques)
 
     def compute_initial_pose(self, ref_dict: Optional[dict] = None) -> None:
         """
