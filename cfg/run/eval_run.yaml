@@ -15,10 +15,16 @@ proprioceptive_inputs: ["root_height", "root_tilt", "local_body_pos", "local_bod
 task_inputs: ["diff_local_body_pos", "diff_local_vel", "local_ref_body_pos"]
 
 xml_path: "data/xml/myolegs.xml"
+# 2025-11-29 ghlee: original KIT test motion file
 motion_file: "data/kit_test_motion_dict.pkl"
+# 2025-11-29 ghlee: use LD-based custom motion dict instead (commented out for now)
+# motion_file: "data/kit_test_motion_dict_LD.pkl"
 smpl_data_dir: "data/smpl"
 initial_pose_file: "data/initial_pose/initial_pose_test.pkl"
 expert_path: ""
 
 recording_biomechanics: False
 deactivate_muscles: False
+record_tracking: True  # Record reference vs simulation tracking data for visualization
+tracking_output_dir: "ghlee/tracking_plots"  # Output directory for tracking plots
+use_initial_pose_alignment: False  # Apply LD→SMPL coordinate alignment for initial pose (for custom motions)

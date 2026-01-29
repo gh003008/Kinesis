@@ -1,0 +1,117 @@
+음 원래 있는걸 백업해서 _backup 이렇게 하지말고 그냥, 새로 만드는거를 예를들어 kit_test_motion_dict_LD.pkl 요런식으로 새로 만들어서 reference motion을 넣어주도록하자, 아마 이렇게 하면 그 뒤에 불러오는 스크립트들도 이제 저 이름으로 불러와야하고 할텐데, 그러면 
+원래 경로 같은거 설정해주는 코드는 주석처리하고 그 밑에다 저런 새이름으로 넣어주고 하는식으로 코드 수정해줘.
+
+수정한 파일들
+eval_run.py
+
+
+학습된 policy
+cd /home/gunhee/workspace/Kinesis && bash scripts/kit-locomotion.sh --mode test --headless False
+
+cd /home/gunhee/workspace/Kinesis && source ~/anaconda3/etc/profile.d/conda.sh && conda activate kinesis && python src/run.py run=eval_run run.motion_file=data/kit_test_motion_dict_LD.pkl run.num_motions=26 run.random_sample=False run.motion_id=0 --config-dir cfg
+
+
+
+기본 제공 policy로 돌리기
+cd /home/gunhee/workspace/Kinesis && source /home/gunhee/anaconda3/etc/profile.d/conda.sh && conda activate kinesis && bash scripts/kit-locomotion.sh --mode test --headless False
+
+
+[260107] 변환된 모션을 pre-trained policy로 돌려보기
+./ghlee/eval_custom_motion.sh /home/gunhee/projects/c3d_to_smpl/data/output/kinesis_format/S004/level_08mps_01_kinesis_forward.pkl
+
+[260107] 변환 스크립트
+python ghlee/convert_smpl_to_kinesis.py \
+    --input /home/gunhee/projects/c3d_to_smpl/data/output/kinesis_format/S004/level_08mps_01_kinesis_forward.pkl \
+    --output data/level_08mps_01_kinesis.pkl \
+    --fps 30
+
+[260107] 평가 스크립트
+cd /home/gunhee/workspace/Kinesis && python src/run.py     exp_name=kinesis-moe-imitation     epoch=-1     run=eval_run     run.headless=False     run.motion_file=data/level_08mps_01_kinesis.pkl     run.num_motions=1     run.record_tracking=True     env.termination_distance=0.5
+    
+ cd /home/gunhee/workspace/Kinesis && python src/run.py \
+    exp_name=kinesis-moe-imitation \
+    epoch=-1 \
+    run=eval_run \
+    run.headless=False \
+    run.motion_file=data/level_08mps_01_kinesis.pkl \
+    run.num_motions=1 \
+    run.record_tracking=True \
+    env.termination_distance=0.5   
+    
+    
+cd /home/gunhee/workspace/Kinesis && python src/run.py \
+    exp_name=kinesis-moe-imitation \
+    epoch=-1 \
+    run=eval_run \
+    run.headless=False \
+    run.motion_file=data/level_08mps_01_kinesis_REAL.pkl \
+    run.num_motions=1 \
+    run.record_tracking=True \
+    env.termination_distance=0.5   
+[260109] Reference motion을 SMPL로 MuJoCo 휴머노이드로 시각화    
+    
+    
+변환 + LD 돌려보기
+cd /home/gunhee/workspace/Kinesis
+
+python ghlee/h5_to_kit_convert.py \
+  --input_dir /home/gunhee/LD \
+  --output data/kit_test_motion_dict_LD.pkl \
+  --target_fps 30
+
+bash scripts/kit-locomotion-LD.sh --mode test --headless False
+
+
+새 버젼 
+cd /home/gunhee/workspace/Kinesis
+
+python ghlee/h5_to_rl_convert.py \
+  --input_dir /home/gunhee/LD \
+  --output data/kit_test_motion_dict_LD_RL.pkl \
+  --target_fps 30
+  
+  cd /home/gunhee/workspace/Kines
+  
+  
+
+  
+  
+ c3d 변환
+cd /home/gunhee/projects/c3d_to_smpl && /home/gunhee/anaconda3/envs/soma/bin/python scripts/convert_c3d_markers.py data/input/S004/level_08mps_01/level_08mps_01.c3d data/input/S004/level_08mps_01/level_08mps_01_smpl.c3d
+
+12000프레임 변환
+cd /home/gunhee/projects/c3d_to_smpl && conda run -n soma python scripts/run_moshpp_configurable.py --input data/input/S004_smpl_converted/level_08mps_01_smpl.c3d --output data/output/moshpp_full --end_frame -1 --verbosity 2 2>&1 | tee full_conversion.log
+
+
+플롯 생성
+cd /home/gunhee/workspace/Kinesis
+
+python src/run.py \
+    exp_name=kinesis-moe-imitation \
+    epoch=-1 \
+    run=eval_run \
+    run.headless=True \
+    run.motion_file=data/kit_test_motion_dict.pkl \
+    run.num_motions=10 \
+    run.record_tracking=True \
+    env.termination_distance=0.5
+    
+    
+병렬 변환 (수정 필요 할 수 도 있음)
+cd /home/gunhee/projects/c3d_to_smpl && python scripts/run_parallel_moshpp.py \
+  --input data/input/S004_smpl_converted/level_08mps_01_smpl.c3d \
+  --output data/output/moshpp_parallel_test \
+  --batch_size 100 \
+  --workers 2 \
+  --verbosity 1
+  
+  cd /home/gunhee/projects/c3d_to_smpl && \
+source ~/anaconda3/etc/profile.d/conda.sh && \
+conda activate soma && \
+python scripts/run_parallel_moshpp.py \
+  --input data/input/S004_smpl_converted/level_08mps_01_smpl.c3d \
+  --output data/output/moshpp_parallel_full \
+  --batch_size 500 \
+  --workers 2 \
+  --verbosity 1
+  

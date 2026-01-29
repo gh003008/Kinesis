@@ -102,6 +102,10 @@ class AgentIM(AgentHumanoid):
 
         with to_cpu(*self.sample_modules), torch.no_grad():
             for run_idx in self.env.forward_motions():
+                # Set tracking motion index for current motion
+                if hasattr(self.env, 'record_tracking') and self.env.record_tracking:
+                    self.env.tracking_motion_idx = run_idx
+                
                 success = False
                 for attempt in range(1):
                     result, mpjpe, frame_coverage = self.eval_single_thread()
@@ -114,6 +118,7 @@ class AgentIM(AgentHumanoid):
                     success_dict[run_idx] = success
                     mpjpe_dict[run_idx] = mpjpe
                     frame_coverage_dict[run_idx] = frame_coverage
+                        
                 if runs is not None:
                     run_ctr += 1
                     if run_ctr >= runs:
@@ -135,9 +140,14 @@ class AgentIM(AgentHumanoid):
             np.save(f"data/dumps/failed_keys_{self.cfg.epoch}.npy", failed_keys)
 
         if self.env.recording_biomechanics:
-            breakpoint()
-            print("Saving recorded biomechanics data.")
-            
+            print("\n" + "="*80)
+            print("Saving biomechanics data (muscle activations & joint torques)")
+            print("="*80)
+            self.env.save_biomechanics_data()
+        
+        # Save tracking data if enabled
+        if hasattr(self.env, 'record_tracking') and self.env.record_tracking:
+            self.env.save_tracking_data()
 
         return mpjpe_dict, success_rate
 

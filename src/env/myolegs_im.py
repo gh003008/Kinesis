@@ -118,6 +118,7 @@ class MyoLegsIm(MyoLegsTask):
         self.recording_biomechanics = cfg.run.recording_biomechanics
         self.record_tracking = cfg.run.get("record_tracking", False)  # New: track ref vs sim positions
         self.tracking_output_dir = cfg.run.get("tracking_output_dir", "ghlee/tracking_plots")  # Custom output directory
+        self.use_initial_pose_alignment = cfg.run.get("use_initial_pose_alignment", False)  # Apply LD→SMPL alignment
 
     def load_initial_pose_data(self) -> None:
         """
@@ -407,10 +408,20 @@ class MyoLegsIm(MyoLegsTask):
             if self.initial_pose is None:
                 breakpoint()
             self.mj_data.qpos[7:] = self.initial_pose[7:]
+            
+            # Apply LD→SMPL alignment if enabled (for custom motions)
+            if self.use_initial_pose_alignment:
+                self.apply_initial_pose_alignment()
+            
             mujoco.mj_kinematics(self.mj_model, self.mj_data)
         elif self.initial_pose is not None:
             # Constant initial pose
             self.mj_data.qpos[:] = self.initial_pose
+            
+            # Apply LD→SMPL alignment if enabled
+            if self.use_initial_pose_alignment:
+                self.apply_initial_pose_alignment()
+            
             mujoco.mj_kinematics(self.mj_model, self.mj_data)
         else:
             # During IK, the humanoid sometimes reaches unfeasible positions. If that happens, we flag the motion and remove it from the dataset.
@@ -977,11 +988,14 @@ class MyoLegsIm(MyoLegsTask):
         ]
         
         # 각 조인트의 토크 추출
+        # qfrc_actuator는 DOF 인덱스를 사용 (freejoint 6 DOF 이후부터 시작)
         torques = []
         for joint_name in joint_names:
             joint_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+            # Get DOF address for this joint
+            dof_adr = self.mj_model.jnt_dofadr[joint_id]
             # qfrc_actuator: actuator(근육)에 의한 조인트 토크
-            torques.append(self.mj_data.qfrc_actuator[joint_id])
+            torques.append(self.mj_data.qfrc_actuator[dof_adr])
         
         return np.array(torques)
 
@@ -1146,6 +1160,439 @@ class MyoLegsIm(MyoLegsTask):
         )
         
         print(f"Tracking plots saved to: {output_dir}")
+
+    def save_biomechanics_data(self, output_dir=None) -> None:
+        """
+        Saves biomechanics data (muscle activations & joint torques) and generates plots.
+        
+        Args:
+            output_dir: Directory to save biomechanics data and plots (defaults to ghlee/biomechanics_data)
+        """
+        if output_dir is None:
+            output_dir = "ghlee/biomechanics_data"
+        
+        import os
+        os.makedirs(output_dir, exist_ok=True)
+        
+        if not self.recording_biomechanics or len(self.muscle_controls) == 0:
+            print(f"[WARNING] No biomechanics data to save. recording_biomechanics={self.recording_biomechanics}, data_len={len(self.muscle_controls) if hasattr(self, 'muscle_controls') else 0}")
+            return
+        
+        # Convert lists to arrays
+        muscle_activations = np.array(self.muscle_controls)  # (T, 80)
+        joint_torques = np.array(self.joint_torques)  # (T, 10)
+        joint_positions = np.array(self.joint_pos)  # (T, num_joints)
+        joint_velocities = np.array(self.joint_vel)  # (T, num_joints)
+        
+        motion_name = self.motion_lib.curr_motion_keys[0] if hasattr(self, 'motion_lib') else 'unknown'
+        
+        # Save data
+        data = {
+            'muscle_activations': muscle_activations,
+            'joint_torques': joint_torques,
+            'joint_positions': joint_positions,
+            'joint_velocities': joint_velocities,
+            'motion_name': motion_name,
+            'dt': self.dt,
+            'joint_names': [
+                'hip_flexion_r', 'hip_adduction_r', 'hip_rotation_r',
+                'knee_angle_r', 'ankle_angle_r',
+                'hip_flexion_l', 'hip_adduction_l', 'hip_rotation_l',
+                'knee_angle_l', 'ankle_angle_l'
+            ]
+        }
+        
+        import joblib
+        output_file = os.path.join(output_dir, f"biomechanics_{motion_name}.pkl")
+        joblib.dump(data, output_file)
+        print(f"✓ Biomechanics data saved to: {output_file}")
+        
+        # Generate plots
+        print(f"\nGenerating biomechanics plots for motion: {motion_name}")
+        self._plot_muscle_activations(muscle_activations, motion_name, output_dir)
+        self._plot_joint_torques(joint_torques, data['joint_names'], motion_name, output_dir)
+        
+        # Gait cycle analysis
+        print(f"\nGenerating gait cycle analysis...")
+        self._plot_gait_cycle_torques(joint_torques, data['joint_names'], motion_name, output_dir)
+        self._plot_gait_cycle_muscles(muscle_activations, motion_name, output_dir)
+        
+        print(f"✓ Biomechanics plots saved to: {output_dir}")
+
+    def _plot_muscle_activations(self, activations, motion_name, output_dir):
+        """Plot muscle activations over time (first 10 seconds)"""
+        import matplotlib.pyplot as plt
+        
+        T, num_muscles = activations.shape
+        time = np.arange(T) * self.dt
+        
+        # Limit to first 10 seconds
+        max_time = 10.0
+        max_idx = min(int(max_time / self.dt), T)
+        time = time[:max_idx]
+        activations = activations[:max_idx]
+        
+        # Key muscles with correct indices
+        key_muscles_r = {
+            'BF Long (R)': 6,      # bflh_r
+            'Gastroc (R)': 13,     # gasmed_r
+            'Glute Max (R)': 14,   # glmax1_r
+            'Rect Fem (R)': 29,    # recfem_r
+            'Soleus (R)': 33,      # soleus_r
+            'Tib Ant (R)': 35,     # tibant_r
+            'Vast Lat (R)': 38,    # vaslat_r
+        }
+        
+        key_muscles_l = {
+            'BF Long (L)': 46,     # bflh_l
+            'Gastroc (L)': 53,     # gasmed_l
+            'Glute Max (L)': 54,   # glmax1_l
+            'Rect Fem (L)': 69,    # recfem_l
+            'Soleus (L)': 73,      # soleus_l
+            'Tib Ant (L)': 75,     # tibant_l
+            'Vast Lat (L)': 78,    # vaslat_l
+        }
+        
+        # Plot
+        fig, axes = plt.subplots(7, 1, figsize=(14, 12))
+        fig.suptitle(f'Muscle Activations (0-10s) - {motion_name}', fontsize=16, fontweight='bold')
+        
+        muscle_names = ['BF Long', 'Gastroc', 'Glute Max', 'Rect Fem', 'Soleus', 'Tib Ant', 'Vast Lat']
+        
+        for idx, muscle_name in enumerate(muscle_names):
+            ax = axes[idx]
+            
+            # Right leg
+            r_name = f'{muscle_name} (R)'
+            r_idx = key_muscles_r[r_name]
+            ax.plot(time, activations[:, r_idx], 'b-', linewidth=2, label='Right', alpha=0.8)
+            
+            # Left leg
+            l_name = f'{muscle_name} (L)'
+            l_idx = key_muscles_l[l_name]
+            ax.plot(time, activations[:, l_idx], 'r--', linewidth=2, label='Left', alpha=0.8)
+            
+            ax.set_ylabel('Activation', fontsize=10)
+            ax.set_title(muscle_name, fontsize=11, fontweight='bold', loc='left')
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc='upper right', fontsize=9)
+            ax.set_ylim([0, 1])
+            ax.set_xlim([0, max_time])
+            
+            if idx == len(muscle_names) - 1:
+                ax.set_xlabel('Time (s)', fontsize=11)
+        
+        plt.tight_layout()
+        output_file = os.path.join(output_dir, f"muscle_activation_{motion_name}.png")
+        plt.savefig(output_file, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"  - Saved muscle activation plot: {output_file}")
+
+    def _plot_joint_torques(self, torques, joint_names, motion_name, output_dir):
+        """Plot joint torques over time"""
+        import matplotlib.pyplot as plt
+        
+        T, num_joints = torques.shape
+        time = np.arange(T) * self.dt
+        
+        # Create subplot for each leg
+        fig, axes = plt.subplots(2, 3, figsize=(16, 10))
+        fig.suptitle(f'Joint Torques - {motion_name}', fontsize=16, fontweight='bold')
+        
+        # Right leg
+        right_joints = ['hip_flexion_r', 'hip_adduction_r', 'hip_rotation_r', 'knee_angle_r', 'ankle_angle_r']
+        right_indices = [0, 1, 2, 3, 4]
+        
+        for idx, (joint_name, joint_idx) in enumerate(zip(right_joints, right_indices)):
+            row = idx // 3
+            col = idx % 3
+            axes[row, col].plot(time, torques[:, joint_idx], 'b-', linewidth=2, label='Right')
+            axes[row, col].set_xlabel('Time (s)')
+            axes[row, col].set_ylabel('Torque (Nm)')
+            axes[row, col].set_title(joint_name.replace('_', ' ').title())
+            axes[row, col].grid(True, alpha=0.3)
+            axes[row, col].axhline(y=0, color='k', linestyle='--', alpha=0.3)
+        
+        # Left leg on the same plots
+        left_joints = ['hip_flexion_l', 'hip_adduction_l', 'hip_rotation_l', 'knee_angle_l', 'ankle_angle_l']
+        left_indices = [5, 6, 7, 8, 9]
+        
+        for idx, (joint_name, joint_idx) in enumerate(zip(left_joints, left_indices)):
+            row = idx // 3
+            col = idx % 3
+            axes[row, col].plot(time, torques[:, joint_idx], 'r--', linewidth=2, label='Left', alpha=0.7)
+            axes[row, col].legend()
+        
+        # Remove empty subplot
+        fig.delaxes(axes[1, 2])
+        
+        plt.tight_layout()
+        output_file = os.path.join(output_dir, f"joint_torque_{motion_name}.png")
+        plt.savefig(output_file, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"  - Saved joint torque plot: {output_file}")
+
+    def _detect_gait_cycles(self, foot_contacts_r, foot_contacts_l):
+        """
+        Detect gait cycles based on foot contact events.
+        
+        Returns:
+            List of (start_idx, end_idx) tuples for each gait cycle
+        """
+        # Detect heel strikes (contact transitions from 0 to 1)
+        # For simplicity, use foot height from body_pos if available
+        # Otherwise, detect from ground contact forces
+        
+        # Use right foot as reference
+        heel_strikes = []
+        for i in range(1, len(foot_contacts_r)):
+            if foot_contacts_r[i] > 0.5 and foot_contacts_r[i-1] <= 0.5:
+                heel_strikes.append(i)
+        
+        # Create gait cycles between consecutive heel strikes
+        cycles = []
+        for i in range(len(heel_strikes) - 1):
+            cycles.append((heel_strikes[i], heel_strikes[i+1]))
+        
+        return cycles
+
+    def _normalize_to_gait_cycle(self, data, cycles):
+        """
+        Normalize data to 0-100% gait cycle.
+        
+        Args:
+            data: (T, ...) array
+            cycles: List of (start, end) indices
+            
+        Returns:
+            normalized_cycles: List of normalized arrays (101, ...)
+        """
+        normalized = []
+        cycle_length = 101  # 0-100%
+        
+        for start, end in cycles:
+            cycle_data = data[start:end]
+            if len(cycle_data) < 10:  # Skip too short cycles
+                continue
+            
+            # Interpolate to 101 points (0-100%)
+            from scipy.interpolate import interp1d
+            old_x = np.linspace(0, 100, len(cycle_data))
+            new_x = np.linspace(0, 100, cycle_length)
+            
+            if cycle_data.ndim == 1:
+                f = interp1d(old_x, cycle_data, kind='cubic', fill_value='extrapolate')
+                normalized.append(f(new_x))
+            else:
+                normalized_cycle = []
+                for dim in range(cycle_data.shape[1]):
+                    f = interp1d(old_x, cycle_data[:, dim], kind='cubic', fill_value='extrapolate')
+                    normalized_cycle.append(f(new_x))
+                normalized.append(np.array(normalized_cycle).T)
+        
+        return np.array(normalized)  # (num_cycles, 101, ...)
+
+    def _plot_gait_cycle_torques(self, torques, joint_names, motion_name, output_dir):
+        """Plot joint torques normalized to gait cycle with mean ± std"""
+        import matplotlib.pyplot as plt
+        from scipy import signal
+        
+        T = torques.shape[0]
+        
+        # Detect foot contacts using body positions (approximate)
+        # For now, use simple peak detection on ankle torques as proxy
+        ankle_r_torque = torques[:, 4]  # ankle_angle_r
+        ankle_l_torque = torques[:, 9]  # ankle_angle_l
+        
+        # Find peaks in ankle torque (plantarflexion) as heel strikes
+        peaks_r, _ = signal.find_peaks(ankle_r_torque, distance=50, prominence=5)
+        peaks_l, _ = signal.find_peaks(ankle_l_torque, distance=50, prominence=5)
+        
+        # Create gait cycles
+        cycles_r = [(peaks_r[i], peaks_r[i+1]) for i in range(len(peaks_r)-1)]
+        
+        if len(cycles_r) < 2:
+            print(f"  [WARNING] Not enough gait cycles detected ({len(cycles_r)}). Skipping gait cycle plot.")
+            return
+        
+        # Normalize torques to gait cycle
+        normalized_torques = self._normalize_to_gait_cycle(torques, cycles_r)
+        
+        if len(normalized_torques) == 0:
+            print(f"  [WARNING] No valid gait cycles. Skipping gait cycle plot.")
+            return
+        
+        # Plot
+        fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+        fig.suptitle(f'Joint Torques - Gait Cycle (N={len(normalized_torques)} cycles) - {motion_name}', 
+                     fontsize=16, fontweight='bold')
+        
+        gait_pct = np.linspace(0, 100, 101)
+        
+        # Right leg joints
+        right_joints = ['Hip Flexion', 'Hip Adduction', 'Hip Rotation', 'Knee', 'Ankle']
+        right_indices = [0, 1, 2, 3, 4]
+        
+        for idx, (joint_name, joint_idx) in enumerate(zip(right_joints, right_indices)):
+            row = idx // 3
+            col = idx % 3
+            ax = axes[row, col]
+            
+            # Right leg data
+            data_r = normalized_torques[:, :, joint_idx]  # (num_cycles, 101)
+            mean_r = np.mean(data_r, axis=0)
+            std_r = np.std(data_r, axis=0)
+            
+            ax.plot(gait_pct, mean_r, 'b-', linewidth=2.5, label='Right')
+            ax.fill_between(gait_pct, mean_r - std_r, mean_r + std_r, color='b', alpha=0.2)
+            
+            # Left leg data (indices 5-9)
+            if joint_idx < 5:
+                data_l = normalized_torques[:, :, joint_idx + 5]
+                mean_l = np.mean(data_l, axis=0)
+                std_l = np.std(data_l, axis=0)
+                
+                ax.plot(gait_pct, mean_l, 'r--', linewidth=2.5, label='Left', alpha=0.8)
+                ax.fill_between(gait_pct, mean_l - std_l, mean_l + std_l, color='r', alpha=0.2)
+            
+            ax.set_xlabel('Gait Cycle (%)', fontsize=11)
+            ax.set_ylabel('Torque (Nm)', fontsize=11)
+            ax.set_title(joint_name, fontsize=12, fontweight='bold')
+            ax.grid(True, alpha=0.3)
+            ax.axhline(y=0, color='k', linestyle='--', alpha=0.3)
+            ax.legend(fontsize=9)
+            ax.set_xlim([0, 100])
+        
+        # Remove empty subplot
+        fig.delaxes(axes[1, 2])
+        
+        plt.tight_layout()
+        output_file = os.path.join(output_dir, f"gait_cycle_torque_{motion_name}.png")
+        plt.savefig(output_file, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"  - Saved gait cycle torque plot: {output_file}")
+
+    def _plot_gait_cycle_muscles(self, activations, motion_name, output_dir):
+        """Plot key muscle activations normalized to gait cycle"""
+        import matplotlib.pyplot as plt
+        from scipy import signal
+        
+        # Key muscles with correct indices
+        key_muscles_r = {
+            'BF Long': 6,      # bflh_r
+            'Gastroc': 13,     # gasmed_r
+            'Glute Max': 14,   # glmax1_r
+            'Rect Fem': 29,    # recfem_r
+            'Soleus': 33,      # soleus_r
+            'Tib Ant': 35,     # tibant_r
+            'Vast Lat': 38,    # vaslat_r
+        }
+        
+        key_muscles_l = {
+            'BF Long': 46,     # bflh_l
+            'Gastroc': 53,     # gasmed_l
+            'Glute Max': 54,   # glmax1_l
+            'Rect Fem': 69,    # recfem_l
+            'Soleus': 73,      # soleus_l
+            'Tib Ant': 75,     # tibant_l
+            'Vast Lat': 78,    # vaslat_l
+        }
+        
+        # Detect gait cycles from gastrocnemius activity (right leg)
+        gastroc_act = activations[:, 13]  # gasmed_r
+        peaks, _ = signal.find_peaks(gastroc_act, distance=50, prominence=0.1)
+        cycles = [(peaks[i], peaks[i+1]) for i in range(len(peaks)-1)]
+        
+        if len(cycles) < 2:
+            print(f"  [WARNING] Not enough gait cycles detected for muscles. Skipping.")
+            return
+        
+        # Normalize to gait cycle
+        normalized_act = self._normalize_to_gait_cycle(activations, cycles)
+        
+        if len(normalized_act) == 0:
+            print(f"  [WARNING] No valid muscle gait cycles. Skipping.")
+            return
+        
+        # Plot
+        fig, axes = plt.subplots(4, 2, figsize=(14, 14))
+        fig.suptitle(f'Muscle Activations - Gait Cycle (N={len(normalized_act)} cycles) - {motion_name}', 
+                     fontsize=16, fontweight='bold')
+        
+        gait_pct = np.linspace(0, 100, 101)
+        
+        muscle_names = list(key_muscles_r.keys())
+        
+        for idx, muscle_name in enumerate(muscle_names):
+            row = idx // 2
+            col = idx % 2
+            ax = axes[row, col]
+            
+            # Right leg
+            r_idx = key_muscles_r[muscle_name]
+            data_r = normalized_act[:, :, r_idx]
+            mean_r = np.mean(data_r, axis=0)
+            std_r = np.std(data_r, axis=0)
+            
+            ax.plot(gait_pct, mean_r, 'b-', linewidth=2.5, label='Right')
+            ax.fill_between(gait_pct, mean_r - std_r, mean_r + std_r, color='b', alpha=0.2)
+            
+            # Left leg
+            l_idx = key_muscles_l[muscle_name]
+            data_l = normalized_act[:, :, l_idx]
+            mean_l = np.mean(data_l, axis=0)
+            std_l = np.std(data_l, axis=0)
+            
+            ax.plot(gait_pct, mean_l, 'r--', linewidth=2.5, label='Left', alpha=0.8)
+            ax.fill_between(gait_pct, mean_l - std_l, mean_l + std_l, color='r', alpha=0.2)
+            
+            ax.set_xlabel('Gait Cycle (%)', fontsize=11)
+            ax.set_ylabel('Muscle Activation', fontsize=11)
+            ax.set_title(f'{muscle_name}', fontsize=12, fontweight='bold')
+            ax.grid(True, alpha=0.3)
+            ax.legend(fontsize=9)
+            ax.set_xlim([0, 100])
+            ax.set_ylim([0, 1])
+        
+        # Remove empty subplot
+        fig.delaxes(axes[3, 1])
+        
+        plt.tight_layout()
+        output_file = os.path.join(output_dir, f"gait_cycle_muscle_{motion_name}.png")
+        plt.savefig(output_file, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"  - Saved gait cycle muscle plot: {output_file}")
+
+    def apply_initial_pose_alignment(self) -> None:
+        """
+        Apply LD→SMPL coordinate alignment correction to the initial pose.
+        
+        This corrects the coordinate system mismatch between LD (Lab Data) and SMPL:
+        - LD uses Z-up, X-forward
+        - SMPL uses Y-up, Z-forward
+        
+        The correction rotates the pelvis orientation to align the humanoid
+        with the reference motion trajectory.
+        """
+        # Rotation from LD to SMPL coordinate system
+        # LD: Z-up, X-forward → SMPL: Y-up, Z-forward
+        # This is a 90° rotation around X-axis
+        ld_to_smpl_rot = sRot.from_euler("X", 90, degrees=True)
+        
+        # Get current pelvis orientation (qpos[3:7] is pelvis quaternion in w,x,y,z format)
+        current_pelvis_quat = self.mj_data.qpos[3:7]  # [w, x, y, z]
+        
+        # Convert to scipy format [x, y, z, w]
+        current_pelvis_rot = sRot.from_quat(np.roll(current_pelvis_quat, -1))
+        
+        # Apply alignment correction
+        aligned_pelvis_rot = ld_to_smpl_rot * current_pelvis_rot
+        
+        # Convert back to MuJoCo format [w, x, y, z]
+        aligned_quat = aligned_pelvis_rot.as_quat()  # [x, y, z, w]
+        self.mj_data.qpos[3:7] = np.roll(aligned_quat, 1)  # [w, x, y, z]
+        
+        print(f"[INFO] Applied LD→SMPL initial pose alignment correction")
 
 
 def compute_imitation_observations(

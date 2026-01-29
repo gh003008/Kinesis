@@ -1,0 +1,154 @@
+soma 환경 사용 코드
+
+test_step1_s005.py
+
+
+이걸로 새로 시작 ㄱㄱ
+
+scripts/
+├── pipeline/              # 핵심 파이프라인 (7개)
+│   ├── run_moshpp_configurable.py
+│   ├── smpl_to_kinesis_converter.py
+│   ├── create_marker_layout.py
+│   ├── convert_c3d_markers.py
+│   ├── run_parallel_moshpp.py
+│   ├── test_step1.py
+│   └── test_step1_s005.py
+├── motion_visualizer/     # 시각화 (2개)
+│   ├── animate_smpl.py
+│   └── view_smpl_proper.py
+├── data_struct_viewers/   # 데이터 검사 (3개)
+│   ├── data_struct_viewer_c3d.py
+│   ├── data_struct_viewer_h5.py
+│   └── data_struct_viewer_smpl.py
+└── utils/                 # 유틸리티 (3개)
+    ├── add_forward_motion.py
+    ├── inspect_pkl_structure.py
+    └── opensim_to_smpl_mapping.py
+    
+    여기서 파이프라인 안에 들어있는 코드들 쭉 읽어 보고, 어떤 순서로 쓰면 될지, 각 코드들이 잘 호환되게 할라면 뭘 수정하면 될지 봐줘
+    
+    cd /home/gunhee/projects/c3d_to_smpl && python scripts/pipeline/run_moshpp_configurable.py \
+  --input data/output/c3d/S004/S004_1000F.c3d \
+  --output data/output/moshpp_results/S004/S004_1000F_v2 \
+  --marker_layout data/output/c3d/S004/S004_1000F_v2_smpl.json \
+  --start_frame 0 --end_frame 1000 \
+  --stagei_frames 6 --maxiter 20 \
+  --data_weight 500.0 --velo_weight 2.0 --prior_weight 0.0 \
+  --gender neutral --verbosity 2	
+  
+  
+    Final format:
+    pose_aa             : (1000, 72)           float64
+    pose_quat           : (1000, 24, 4)        float32
+    pose_quat_global    : (1000, 24, 4)        float64
+    trans_orig          : (1000, 3)            float64
+    root_trans_offset   : torch.Size([1000, 3]) torch.float32
+    beta                : (16,)                float64
+    gender              : str                  = neutral
+    fps                 : int                  = 100
+    
+    1000 is frame number
+    
+    
+    
+    
+    
+    
+    > EOF
+======================================================================
+�� 올바른 회전 비대칭성 분석 (Geodesic Distance)
+======================================================================
+
+======================================================================
+📊 KIT WalkForward09 (Reference)
+======================================================================
+  Frames: 213
+
+  [방법 1] 단순 Geodesic Distance (L vs R):
+    Hip     : 0.3959 rad =  22.69°
+    Knee    : 0.3288 rad =  18.84°
+    Ankle   : 0.2684 rad =  15.38°
+    Foot    : 0.0000 rad =   0.00°
+
+  [방법 2] 미러링 보정 (L vs R_mirrored):
+    Hip     : 0.4364 rad =  25.00°
+    Knee    : 0.3415 rad =  19.56°
+    Ankle   : 0.3769 rad =  21.60°
+    Foot    : 0.0000 rad =   0.00°
+
+  [디버깅] 각 joint의 축별 평균 (radians):
+    Hip L: X=+0.215, Y=+0.133, Z=+0.083
+    Hip R: X=+0.144, Y=-0.067, Z=-0.025
+    Knee L: X=+0.043, Y=-0.036, Z=-0.053
+    Knee R: X=+0.154, Y=+0.037, Z=+0.021
+    Ankle L: X=-0.114, Y=+0.173, Z=-0.014
+    Ankle R: X=-0.158, Y=-0.055, Z=+0.060
+    Foot L: X=+0.000, Y=+0.000, Z=+0.000
+    Foot R: X=+0.000, Y=+0.000, Z=+0.000
+
+======================================================================
+📊 S004 v1 (기존 매핑)
+======================================================================
+  Frames: 1000
+
+  [방법 1] 단순 Geodesic Distance (L vs R):
+    Hip     : 0.8031 rad =  46.01°
+    Knee    : 0.6349 rad =  36.38°
+    Ankle   : 0.8933 rad =  51.18°
+    Foot    : 0.0000 rad =   0.00°
+
+  [방법 2] 미러링 보정 (L vs R_mirrored):
+    Hip     : 0.6361 rad =  36.45°
+    Knee    : 0.5169 rad =  29.61°
+    Ankle   : 0.7128 rad =  40.84°
+    Foot    : 0.0000 rad =   0.00°
+
+  [디버깅] 각 joint의 축별 평균 (radians):
+    Hip L: X=+0.083, Y=-0.379, Z=-0.078
+    Hip R: X=-0.010, Y=+0.234, Z=+0.061
+    Knee L: X=+0.071, Y=-0.328, Z=+0.002
+    Knee R: X=+0.086, Y=-0.550, Z=-0.201
+    Ankle L: X=-0.100, Y=+0.954, Z=-0.310
+    Ankle R: X=-0.022, Y=+0.268, Z=+0.236
+    Foot L: X=+0.000, Y=+0.000, Z=+0.000
+    Foot R: X=+0.000, Y=+0.000, Z=+0.000
+
+======================================================================
+📊 S004 v2 (새 매핑)
+======================================================================
+  Frames: 1000
+
+  [방법 1] 단순 Geodesic Distance (L vs R):
+    Hip     : 0.4477 rad =  25.65°
+    Knee    : 1.0318 rad =  59.12°
+    Ankle   : 1.4957 rad =  85.69°
+    Foot    : 0.0000 rad =   0.00°
+
+  [방법 2] 미러링 보정 (L vs R_mirrored):
+    Hip     : 0.2382 rad =  13.65°
+    Knee    : 0.9549 rad =  54.71°
+    Ankle   : 1.3037 rad =  74.70°
+    Foot    : 0.0000 rad =   0.00°
+
+  [디버깅] 각 joint의 축별 평균 (radians):
+    Hip L: X=+0.103, Y=-0.100, Z=+0.009
+    Hip R: X=+0.031, Y=+0.007, Z=+0.037
+    Knee L: X=+0.073, Y=-0.689, Z=-0.082
+    Knee R: X=+0.042, Y=+0.118, Z=-0.039
+    Ankle L: X=-0.242, Y=+1.033, Z=-0.435
+    Ankle R: X=+0.068, Y=-0.242, Z=+0.254
+    Foot L: X=+0.000, Y=+0.000, Z=+0.000
+    Foot R: X=+0.000, Y=+0.000, Z=+0.000
+
+======================================================================
+📈 비대칭성 비교 요약 (미러링 보정 방법 기준)
+======================================================================
+측정                KIT Ref      S004 v1      S004 v2
+--------------------------------------------------
+Hip               25.00°      36.45°      13.65°
+Knee              19.56°      29.61°      54.71°
+Ankle             21.60°      40.84°      74.70°
+Foot               0.00°       0.00°       0.00°
+======================================================================
+(soma) gunhee@gunhee-B550M-DS3H:~/projects/c3d_to_smpl$ 

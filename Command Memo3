@@ -1,0 +1,201 @@
+🦵 하체 마커 (28개):
+  - L_Ankle_Lat
+  - L_Belt_Front
+  - L_Belt_Rear
+  - L_FM2
+  - L_Heel
+  - L_Knee_Lat
+  - L_Midfoot_Lat
+  - L_Shank_Front
+  - L_Shank_Rear
+  - L_Shank_Upper
+  - L_Thigh_Front
+  - L_Thigh_Rear
+  - L_Thigh_Upper
+  - L_Toe_Med
+  - R_Ankle_Lat
+  - R_Belt_Front
+  - R_Belt_Rear
+  - R_FM2
+  - R_Heel
+  - R_Knee_Lat
+  - R_Midfoot_Lat
+  - R_Shank_Front
+  - R_Shank_Rear
+  - R_Shank_Upper
+  - R_Thigh_Front
+  - R_Thigh_Rear
+  - R_Thigh_Upper
+  - R_Toe_Med
+  
+  python test_step1.py
+  
+  
+ 
+ SMPL joints
+  # 0: Pelvis (root)
+# 1-2: L/R Hip
+# 3: Spine1
+# 4-5: L/R Knee
+# 6: Spine2
+# 7-8: L/R Ankle
+# 9: Spine3
+# 10-11: L/R Foot
+# 12: Neck
+# 13-14: L/R Collar
+# 15: Head
+# 16-17: L/R Shoulder
+# 18-19: L/R Elbow
+# 20-21: L/R Wrist
+# 22-23: L/R Hand
+
+
+# 전체 파이프 라인
+H5 (OpenSim) 
+  ↓ [h5_to_c3d_1000f.py]
+C3D (31 markers)
+  ↓ [run_moshpp_configurable.py]
+SMPL (MoSh++ PKL)
+  ↓ [smpl_to_kinesis_converter.py]  ← 다음 단계!
+Kinesis Format (PKL)
+  ↓ [animate_smpl.py]
+Animation (GIF/MP4)
+
+
+SOMA 공식 마커셋 (Max Planck Institute)
+
+
+* human_body_prior 출처 * 
+GitHub: https://github.com/nghorbani/human_body_prior
+설치: git clone → pip install -e .
+용도: VPoSer + BodyModel (SMPL 로딩)
+
+
+*메모*
+[0109] Pose prior는 자연스러운 인간 포즈의 확률 분포
+[0112] SMPL 라이브러리, body_model.py 조건부로 squeeze() 로직 잘 작동하도록 수정
+[0113] 
+애니메이션 S005
+conda activate soma && cd /home/gunhee/projects/c3d_to_smpl && python scripts/motion_visualizer/animate_mosh_stg2_output.py --input data/output/moshpp_results/S005/level_08mps_01/c3d/S005/level_08mps_trial_01_markers_stageii.pkl --camera front --step 10
+
+[0114] NPZ 파일로 변환 x 이슈
+Moshpp 돌리는 코드 >> run_moshpp_configurable.py
+cd /home/gunhee/projects/c3d_to_smpl && python scripts/pipeline/run_moshpp_configurable.py \
+  --input data/output/c3d/S005/S005_1000F.c3d \
+  --output data/output/moshpp_results/S005/S005_1000F \
+  --marker_layout data/output/c3d/S005/S005_1000F_smpl.json \
+  --start_frame 0 --end_frame 1000 \
+  --stagei_frames 6 --maxiter 20 \
+  --data_weight 500.0 --velo_weight 2.0 --prior_weight 0.0 \
+  --gender neutral --verbosity 2	
+
+h5-> c3d 돌리는 코드 >> h5_to_c3d_1000f
+cd /home/gunhee/projects/c3d_to_smpl && /home/gunhee/anaconda3/envs/soma/bin/python -u scripts/pipeline/h5_to_c3d_1000f.py --subject S004 --frames 1000
+
+h5-> c3d 돌리는 코드 >> h5_to_c3d_1000f_v2 [제윤씨 버젼]
+cd /home/gunhee/projects/c3d_to_smpl && /home/gunhee/anaconda3/envs/soma/bin/python -u scripts/pipeline/h5_to_c3d_1000f_v2.py --subject S004 --frames 1000
+
+디버깅1 
+body_model.py의 allow_pickle = True 추가
+(smpl 모델에는 pickled data가 포함 되어있어서.... 추가 필요)
+NPZ 로딩 후 Chumpy 객체를 NumPy 배열로 변환 필요 --> 적용
+문제 원인: NPZ 파일의 shapedirs가 Chumpy 객체로 저장되어 있어서 torch.tensor()로 변환할 때 에러 발생합니다.
+해결 전략:
+NPZ 로딩 시 Chumpy 객체를 NumPy 배열로 변환
+향후 재발 방지를 위한 패치 문서화
+
+
+smpl -> kinesis 명령어
+cd /home/gunhee/projects/c3d_to_smpl && conda run -n soma python scripts/pipeline/smpl_to_kinesis_converter.py data/output/moshpp_results/S005/S005_1000F/c3d/S005/S005_1000F_stageii.pkl --output data/output/kinesis_format/S005/S005_1000F_kinesis.pkl
+
+######################## C3D to SMPL #################################
+
+[0115] 
+레퍼런스 모션 경로
+/home/gunhee/projects/c3d_to_smpl/data/output/kinesis_format/reference/KIT_WalkForward09_kinesis.pkl
+
+KIT 레퍼런스 모션 시각화 명령어 (KIT_WalkInCircle_ref.pkl)
+cd /home/gunhee/projects/c3d_to_smpl && conda run -n soma python scripts/motion_visualizer/animate_smpl.py --input data/output/kinesis_format/reference/KIT_WalkInCircle_ref.pkl --camera front 2>&1 | head -30
+
+
+
+KIT_WalkForward09
+cd /home/gunhee/projects/c3d_to_smpl && conda run -n soma python scripts/motion_visualizer/animate_smpl.py --input data/output/kinesis_format/reference/KIT_WalkForward09_kinesis.pkl --camera front
+
+
+
+S004
+cd /home/gunhee/projects/c3d_to_smpl && conda run -n soma python scripts/motion_visualizer/animate_smpl.py --input data/output/kinesis_format/S004/S004_1000F_kinesis.pkl 
+--camera front
+
+
+
+S004_v2
+cd /home/gunhee/projects/c3d_to_smpl && conda activate soma && python scripts/motion_visualizer/animate_smpl.py --input data/output/kinesis_format/S004_v2/S004_1000F_v2_kinesis.pkl
+
+
+
+[0119] 월요일
+아니 pose_body_prior 알고보니 활성화 안되어 있었음
++ body_visualizer 미설치여서 
+
+
+
+[0120] 화요일 pose_body_prior 깔아서 진행...
+SMPL 시각화 [c3d_to_smpl = cts]
+python scripts/motion_visualizer/animate_smpl.py --input data/output_v2/moshpp_results/smpl_params/S004_level_08mps_trial_01_stageii.pkl --camera front 2>&1 | head -50
+
+
+[0122] 목요일
+S004 kinesis format 경로
+ /home/gunhee/projects/c3d_to_smpl/data/output/kinesis_format/S004/S004_1000F_kinesis.pkl
+ 
+ 
+
+kinesis 환경에서 모션 시각화 (S004 트레드밀 고려x)
+conda activate kinesis && python ghlee/visualize_reference_motion.py --motion_file /home/gunhee/projects/c3d_to_smpl/data/output/kinesis_format/S004/S004_1000F_kinesis.pkl --motion_idx 0 --ref-only
+
+kinesis 환경에서 모션 시각화 (KIT)
+cd /home/gunhee/workspace/Kinesis && conda activate kinesis && timeout 15 python ghlee/visualize_reference_motion.py --motion_file data/kit_test_motion_dict.pkl --motion_idx 0 --ref-only --slow 0.3 2>&1 | head -35
+
+
+
+
+[0123] 금요일
+
+[add_forward_motion.py] (트레드밀 고려)
+cd /home/gunhee/workspace/Kinesis && conda activate kinesis && python -u ghlee/add_forward_motion.py /home/gunhee/projects/c3d_to_smpl/data/output_v2/kinesis_format/S004_level_08mps_trial_01_kinesis_format.pkl --speed 0.8
+
+[visualize_reference_motion.py] (시각화)
+kinesis 환경에서 모션 시각화 (S004 + 트레드밀 고려)
+cd /home/gunhee/workspace/Kinesis && conda activate kinesis && python ghlee/visualize_reference_motion.py --motion_file /home/gunhee/projects/c3d_to_smpl/data/output_v2/kinesis_format/S004_level_08mps_trial_01_kinesis_format_forward_0.8mps.pkl --motion_idx 0 --ref-only
+
+KINESIS 환경에서 평가 (output_v2/S004 + 트레드밀 고려)
+cd /home/gunhee/workspace/Kinesis && conda activate kinesis && python src/run.py exp_name=kinesis-moe-imitation epoch=-1 run=eval_run run.headless=False run.motion_file=/home/gunhee/projects/c3d_to_smpl/data/output_v2/kinesis_format/S004_level_08mps_trial_01_kinesis_format_forward_0.8mps.pkl env.termination_distance=0.5
+
+cd /home/gunhee/workspace/Kinesis && conda activate kinesis && python src/run.py exp_name=kinesis-moe-imitation epoch=-1 run=eval_run run.headless=False run.motion_file=/home/gunhee/projects/c3d_to_smpl/data/output_v2/kinesis_format/S005_level_08mps_trial_01_kinesis_format_forward_0.8mps.pkl env.termination_distance=0.5
+
+[0125] 일요일
+my_marker.json <- markerset
+MOSHPP 성공 버젼
+
+
+KINESIS 환경에서 평가 (output/S004 + 트레드밀 고려)
+cd /home/gunhee/workspace/Kinesis && conda activate kinesis && python src/run.py exp_name=kinesis-moe-imitation epoch=-1 run=eval_run run.headless=False run.motion_file=/home/gunhee/projects/c3d_to_smpl/data/output/kinesis_format/S004_level_08mps_trial_01_kinesis_format_forward_0.8mps.pkl env.termination_distance=0.5
+
+KINESIS 환경에서 평가 (output/S005 + 트레드밀 고려)
+cd /home/gunhee/workspace/Kinesis && conda activate kinesis && python src/run.py exp_name=kinesis-moe-imitation epoch=-1 run=eval_run run.headless=False run.motion_file=/home/gunhee/projects/c3d_to_smpl/data/output/kinesis_format/S005_level_08mps_trial_01_kinesis_format_forward_0.8mps.pkl env.termination_distance=0.5
+
+kinesis 환경에서 모션 시각화 (output/S005 + 트레드밀 고려)
+cd /home/gunhee/workspace/Kinesis && conda activate kinesis && python ghlee/visualize_reference_motion.py --motion_file /home/gunhee/projects/c3d_to_smpl/data/output/kinesis_format/S005_level_08mps_trial_01_kinesis_format_forward_0.8mps.pkl --motion_idx 0 --ref-only
+
+[0128] 수요일
+KINESIS 환경에서 평가 (output/S004 + 트레드밀 고려 + 근활성, 토크 플롯 추가)
+conda activate kinesis && cd /home/gunhee/workspace/Kinesis && python src/run.py \
+  exp_name=kinesis-moe-imitation \
+  epoch=-1 \
+  run=eval_run \
+  run.headless=False \
+  run.motion_file=/home/gunhee/projects/c3d_to_smpl/data/output/kinesis_format/S004_level_08mps_trial_01_kinesis_format_forward_0.8mps.pkl \
+  run.recording_biomechanics=True \
+  env.termination_distance=0.5

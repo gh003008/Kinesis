@@ -1,0 +1,43 @@
+SMPL pipeline command
+
+[260108]
+SMPL 모션 시각화
+
+# 정면 미리보기
+python scripts/animate_smpl.py \
+    --input data/output/kinesis_format/S004/level_08mps_01_kinesis_forward.pkl \
+    --end 500 --step 5 \
+    --camera front
+
+# 왼쪽 미리보기
+python scripts/animate_smpl.py \
+    --input data/output/kinesis_format/S004/level_08mps_01_kinesis_forward.pkl \
+    --end 500 --step 5 \
+    --camera left
+    
+    
+    
+    S004/level_08mps/trial_01/MoCap/ik_data
+    S004/level_08mps/trial_01/MoCap/markers/data
+    S004/level_08mps/trial_01/MoCap/body_pos_global
+    
+    
+    h5 시작 경로
+    /home/gunhee/LD/S004.h5
+    
+    모션 레퍼런스 smpl 경로
+    /home/gunhee/workspace/Kinesis/data/kit_test_motion_dict.pkl
+    
+    
+    First motion name: 0-KIT_4_WalkInCounterClockwiseCircle04_poses
+
+First motion keys: ['pose_quat_global', 'pose_quat', 'trans_orig', 'root_trans_offset', 'beta', 'gender', 'pose_aa', 'fps']
+
+Data shapes:
+  pose_quat_global: (282, 24, 4) (float64)
+  pose_quat: (282, 24, 4) (float32)
+  trans_orig: (282, 3) (float64)
+  root_trans_offset: tensor([[-1.0031e-01,  1.0770e+00,  9.8327e-01],
+        [-1.0002e-01,  1.0769e+00,  9.8320e-01],
+        
+        
